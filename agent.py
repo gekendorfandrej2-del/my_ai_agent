@@ -1,0 +1,103 @@
+import json
+from gigachat import GigaChat
+from gigachat.models import Chat, Messages, MessagesRole, Function, FunctionParameters
+
+# Импортируем наши реальные функции-инструменты
+from tools import get_disk_space, find_old_screenshots, get_largest_files
+
+# Словарь, который связывает имя функции (для нейросети) с реальной Python-функцией
+AVAILABLE_TOOLS = {
+    "get_disk_space": get_disk_space,
+    "find_old_screenshots": find_old_screenshots,
+    "get_largest_files": get_largest_files,
+}
+
+def get_tool_descriptions():
+    """Возвращает описание инструментов для GigaChat в формате, который он понимает."""
+    return [
+        Function(
+            name="get_disk_space",
+            description="Узнаёт, сколько всего, занято и свободно места на диске.",
+            parameters=FunctionParameters(type="object", properties={}, required=[])
+        ),
+        Function(
+            name="find_old_screenshots",
+            description="Ищет старые скриншоты (файлы с 'screen' или 'снимок' в имени) в папке Изображения, которые старше 14 дней.",
+            parameters=FunctionParameters(type="object", properties={}, required=[])
+        ),
+        Function(
+            name="get_largest_files",
+            description="Показывает список самых больших файлов в домашней папке пользователя.",
+            parameters=FunctionParameters(
+                type="object",
+                properties={
+                    "limit": {"type": "integer", "description": "Сколько файлов показать (по умолчанию 5)"}
+                },
+                required=[]
+            )
+        )
+    ]
+
+def run_agent(giga: GigaChat, user_message: str, chat_history: list) -> str:
+    """Основная логика: отправляет сообщение, обрабатывает вызовы функций и возвращает финальный ответ."""
+    
+    # Добавляем сообщение пользователя в историю
+    chat_history.append(Messages(role=MessagesRole.USER, content=user_message))
+    
+    # Формируем запрос
+    payload = Chat(
+        messages=chat_history,
+        function_call="auto",  # Разрешаем нейросети самой решать, когда вызывать функции
+        functions=get_tool_descriptions(),
+        model="GigaChat-2"
+    )
+    
+    # Отправляем запрос
+    response = giga.chat(payload)
+    
+    # Проверяем, не решила ли нейросеть вызвать инструмент
+    if response.choices[0].finish_reason == "function_call":
+        function_call = response.choices[0].message.function_call
+        function_name = function_call.name
+        arguments = json.loads(function_call.arguments) if function_call.arguments else {}
+        
+        print(f"[Агент решил использовать инструмент: {function_name}]")
+        
+        # Вызываем реальную функцию
+        if function_name in AVAILABLE_TOOLS:
+            try:
+                # Передаём аргументы, если они есть
+                if arguments:
+                    result = AVAILABLE_TOOLS[function_name](**arguments)
+                else:
+                    result = AVAILABLE_TOOLS[function_name]()
+            except Exception as e:
+                result = f"Ошибка при выполнении {function_name}: {e}"
+        else:
+            result = f"Неизвестный инструмент: {function_name}"
+        
+        # Добавляем в историю ответ ассистента (что он попросил вызвать функцию)
+        chat_history.append(response.choices[0].message)
+        
+        # ВАЖНО: GigaChat требует, чтобы результат функции был в формате JSON
+        result_json = json.dumps({"result": str(result)}, ensure_ascii=False)
+        chat_history.append(Messages(role=MessagesRole.FUNCTION, content=result_json, name=function_name))
+        
+        # Отправляем результат обратно нейросети, чтобы она сформировала финальный ответ
+        final_payload = Chat(
+            messages=chat_history,
+            function_call="none", # Больше не разрешаем вызывать функции, только отвечать
+            model="GigaChat-2"
+        )
+        final_response = giga.chat(final_payload)
+        final_answer = final_response.choices[0].message.content
+        
+        # Добавляем финальный ответ в историю
+        chat_history.append(final_response.choices[0].message)
+        
+        return final_answer
+    else:
+        # Если функция не нужна, просто возвращаем обычный ответ
+        answer = response.choices[0].message.content
+        chat_history.append(response.choices[0].message)
+        return answer
