@@ -1,7 +1,7 @@
 import os
 from dotenv import load_dotenv
 from gigachat import GigaChat
-from agent import run_agent
+from agent import run_agent, AVAILABLE_TOOLS
 
 load_dotenv()
 
@@ -21,16 +21,14 @@ try:
         verify_ssl_certs=False,
         model="GigaChat-2"
     )
-    print("Успешно подключено! Я умею проверять место на диске и искать старые скриншоты.")
+    print("Успешно подключено!")
     print("Напишите 'выход' для завершения.\n")
 except Exception as e:
     print(f"Ошибка при подключении: {e}")
     exit(1)
 
-# История диалога (хранит все сообщения, чтобы агент помнил контекст)
 chat_history = []
 
-# Основной цикл
 while True:
     try:
         user_input = input("Вы: ")
@@ -42,8 +40,20 @@ while True:
         if not user_input.strip():
             continue
 
-        # Передаём управление агенту
         answer = run_agent(giga, user_input, chat_history)
+        if "удалить" in answer.lower() or "удаления" in answer.lower():
+            confirm = input("⚠️  Подтвердите удаление (да/нет): ")
+            if confirm.lower() in ["да", "yes", "y"]:
+                from tools import confirm_and_delete
+                # Извлекаем имена файлов из ответа (ищем строки с .png или .jpg)
+                files = [line.split(" (")[0].strip() for line in answer.split("\n") if ".png" in line or ".jpg" in line]
+                if files:
+                    result = confirm_and_delete(files)
+                    print(f"✅ {result}\n")
+                else:
+                    print("Не удалось извлечь имена файлов из ответа.\n")
+            else:
+                print("❌ Удаление отменено.\n")
         print(f"Агент: {answer}\n")
 
     except KeyboardInterrupt:

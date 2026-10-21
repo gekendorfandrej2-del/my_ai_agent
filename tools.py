@@ -16,7 +16,6 @@ def get_disk_space():
 
 def find_old_screenshots(days=14):
     """Ищет файлы в папке Изображения старше указанного количества дней."""
-    # Пробуем найти стандартную папку Изображения
     image_dir = Path.home() / "Изображения"
     if not image_dir.exists():
         image_dir = Path.home() / "Pictures"
@@ -29,10 +28,8 @@ def find_old_screenshots(days=14):
     try:
         for file in image_dir.iterdir():
             if file.is_file():
-                # Берём дату последнего изменения файла
                 mtime = datetime.fromtimestamp(file.stat().st_mtime)
                 if mtime < cutoff_date:
-                    # Проверяем, что это похоже на скриншот (по имени)
                     name_lower = file.name.lower()
                     if "screen" in name_lower or "снимок" in name_lower or "screenshot" in name_lower:
                         size_mb = file.stat().st_size / (1024 * 1024)
@@ -53,9 +50,7 @@ def get_largest_files(limit=5):
     file_sizes = []
     
     try:
-        # Ищем файлы (не заходя в системные папки и скрытые)
         for root, dirs, files in os.walk(home_dir):
-            # Пропускаем скрытые папки (начинаются с точки)
             dirs[:] = [d for d in dirs if not d.startswith('.')]
             for f in files:
                 filepath = Path(root) / f
@@ -66,15 +61,67 @@ def get_largest_files(limit=5):
                 except (PermissionError, OSError):
                     continue
                     
-        # Сортируем по убыванию размера и берём топ
         file_sizes.sort(reverse=True, key=lambda x: x[0])
         
         result = f"Топ {limit} самых больших файлов:\n"
         for size, path in file_sizes[:limit]:
             size_mb = size / (1024 * 1024)
-            # Сокращаем путь для красоты
             short_path = str(path).replace(str(Path.home()), "~")
             result += f"{short_path} — {size_mb:.1f} МБ\n"
         return result
     except Exception as e:
         return f"Ошибка при поиске больших файлов: {e}"
+
+def delete_old_screenshots(days=14):
+    """Удаляет старые скриншоты (с подтверждением в main.py)."""
+    image_dir = Path.home() / "Изображения"
+    if not image_dir.exists():
+        image_dir = Path.home() / "Pictures"
+    if not image_dir.exists():
+        return "Папка с изображениями не найдена."
+    
+    cutoff_date = datetime.now() - timedelta(days=days)
+    deleted_names = []
+    
+    try:
+        for file in image_dir.iterdir():
+            if file.is_file():
+                mtime = datetime.fromtimestamp(file.stat().st_mtime)
+                if mtime < cutoff_date:
+                    name_lower = file.name.lower()
+                    if "screen" in name_lower or "снимок" in name_lower or "screenshot" in name_lower:
+                        deleted_names.append(file.name)
+        
+        if not deleted_names:
+            return "Файлов для удаления не найдено."
+        
+        return f"Найдено {len(deleted_names)} файлов для удаления:\n" + "\n".join(deleted_names)
+    except Exception as e:
+        return f"Ошибка при поиске: {e}"
+
+def confirm_and_delete(files_to_delete):
+    """
+    Удаляет файлы из списка, если они находятся в папке Изображения.
+    Это защита: функция не удалит файлы из других папок.
+    """
+    image_dir = Path.home() / "Изображения"
+    if not image_dir.exists():
+        image_dir = Path.home() / "Pictures"
+    
+    deleted_count = 0
+    errors = []
+    
+    for filename in files_to_delete:
+        filepath = image_dir / filename
+        if filepath.exists() and filepath.is_file():
+            try:
+                filepath.unlink()
+                deleted_count += 1
+            except Exception as e:
+                errors.append(f"{filename}: {e}")
+        else:
+            errors.append(f"{filename}: файл не найден")
+    
+    if errors:
+        return f"Удалено: {deleted_count}. Ошибки: {'; '.join(errors)}"
+    return f"Успешно удалено файлов: {deleted_count}."

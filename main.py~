@@ -1,102 +1,63 @@
-import json
+import os
+from dotenv import load_dotenv
 from gigachat import GigaChat
-from gigachat.models import Chat, Messages, MessagesRole, Function, FunctionParameters
+from agent import run_agent, AVAILABLE_TOOLS
 
-# Импортируем наши реальные функции-инструменты
-from tools import get_disk_space, find_old_screenshots, get_largest_files
+load_dotenv()
 
-# Словарь, который связывает имя функции (для нейросети) с реальной Python-функцией
-AVAILABLE_TOOLS = {
-    "get_disk_space": get_disk_space,
-    "find_old_screenshots": find_old_screenshots,
-    "get_largest_files": get_largest_files,
-}
+client_secret = os.getenv("GIGACHAT_CLIENT_SECRET")
+scope = os.getenv("GIGACHAT_SCOPE", "GIGACHAT_API_PERS")
 
-def get_tool_descriptions():
-    """Возвращает описание инструментов для GigaChat в формате, который он понимает."""
-    return [
-        Function(
-            name="get_disk_space",
-            description="Узнаёт, сколько всего, занято и свободно места на диске.",
-            parameters=FunctionParameters(type="object", properties={}, required=[])
-        ),
-        Function(
-            name="find_old_screenshots",
-            description="Ищет старые скриншоты (файлы с 'screen' или 'снимок' в имени) в папке Изображения, которые старше 14 дней.",
-            parameters=FunctionParameters(type="object", properties={}, required=[])
-        ),
-        Function(
-            name="get_largest_files",
-            description="Показывает список самых больших файлов в домашней папке пользователя.",
-            parameters=FunctionParameters(
-                type="object",
-                properties={
-                    "limit": {"type": "integer", "description": "Сколько файлов показать (по умолчанию 5)"}
-                },
-                required=[]
-            )
-        )
-    ]
+if not client_secret:
+    print("ОШИБКА: Не найден ключ в .env")
+    exit(1)
 
-def run_agent(giga: GigaChat, user_message: str, chat_history: list) -> str:
-    """Основная логика: отправляет сообщение, обрабатывает вызовы функций и возвращает финальный ответ."""
-    
-    # Добавляем сообщение пользователя в историю
-    chat_history.append(Messages(role=MessagesRole.USER, content=user_message))
-    
-    # Формируем запрос
-    payload = Chat(
-        messages=chat_history,
-        function_call="auto",  # Разрешаем нейросети самой решать, когда вызывать функции
-        functions=get_tool_descriptions(),
+print("Подключение к GigaChat...")
+
+try:
+    giga = GigaChat(
+        credentials=client_secret,
+        scope=scope,
+        verify_ssl_certs=False,
         model="GigaChat-2"
     )
-    
-    # Отправляем запрос
-    response = giga.chat(payload)
-    
-    # Проверяем, не решила ли нейросеть вызвать инструмент
-    if response.choices[0].finish_reason == "function_call":
-        function_call = response.choices[0].message.function_call
-        function_name = function_call.name
-        arguments = json.loads(function_call.arguments) if function_call.arguments else {}
+    print("Успешно подключено!")
+    print("Напишите 'выход' для завершения.\n")
+except Exception as e:
+    print(f"Ошибка при подключении: {e}")
+    exit(1)
+
+chat_history = []
+
+while True:
+    try:
+        user_input = input("Вы: ")
         
-        print(f"[Агент решил использовать инструмент: {function_name}]")
+        if user_input.lower() in ["выход", "exit", "quit"]:
+            print("До встречи!")
+            break
         
-        # Вызываем реальную функцию
-        if function_name in AVAILABLE_TOOLS:
-            try:
-                # Передаём аргументы, если они есть
-                if arguments:
-                    result = AVAILABLE_TOOLS[function_name](**arguments)
+        if not user_input.strip():
+            continue
+
+        answer = run_agent(giga, user_input, chat_history)
+                if "удалить" in answer.lower() or "удаления" in answer.lower():
+            confirm = input("⚠️  Подтвердите удаление (да/нет): ")
+            if confirm.lower() in ["да", "yes", "y"]:
+                from tools import confirm_and_delete
+                # Извлекаем имена файлов из ответа (ищем строки с .png или .jpg)
+                files = [line.split(" (")[0].strip() for line in answer.split("\n") if ".png" in line or ".jpg" in line]
+                if files:
+                    result = confirm_and_delete(files)
+                    print(f"✅ {result}\n")
                 else:
-                    result = AVAILABLE_TOOLS[function_name]()
-            except Exception as e:
-                result = f"Ошибка при выполнении {function_name}: {e}"
-        else:
-            result = f"Неизвестный инструмент: {function_name}"
-        
-        # Добавляем в историю ответ ассистента (что он попросил вызвать функцию)
-        chat_history.append(response.choices[0].message)
-        
-        # Добавляем результат работы функции в историю
-        chat_history.append(Messages(role=MessagesRole.FUNCTION, content=str(result), name=function_name))
-        
-        # Отправляем результат обратно нейросети, чтобы она сформировала финальный ответ
-        final_payload = Chat(
-            messages=chat_history,
-            function_call="none", # Больше не разрешаем вызывать функции, только отвечать
-            model="GigaChat-2"
-        )
-        final_response = giga.chat(final_payload)
-        final_answer = final_response.choices[0].message.content
-        
-        # Добавляем финальный ответ в историю
-        chat_history.append(final_response.choices[0].message)
-        
-        return final_answer
-    else:
-        # Если функция не нужна, просто возвращаем обычный ответ
-        answer = response.choices[0].message.content
-        chat_history.append(response.choices[0].message)
-        return answer
+                    print("Не удалось извлечь имена файлов из ответа.\n")
+            else:
+                print("❌ Удаление отменено.\n")
+        print(f"Агент: {answer}\n")
+
+    except KeyboardInterrupt:
+        print("\nЗавершение работы...")
+        break
+    except Exception as e:
+        print(f"\nПроизошла ошибка: {e}\n")
