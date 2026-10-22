@@ -125,3 +125,56 @@ def confirm_and_delete(files_to_delete):
     if errors:
         return f"Удалено: {deleted_count}. Ошибки: {'; '.join(errors)}"
     return f"Успешно удалено файлов: {deleted_count}."
+def list_directory(dir_path):
+    """Показывает содержимое указанного каталога (только внутри домашней папки)."""
+    home_dir = Path.home()
+    target = Path(dir_path).expanduser().resolve()
+
+    # Защита: разрешаем смотреть только внутри домашней папки
+    if not str(target).startswith(str(home_dir)):
+        return "Ошибка: доступ разрешен только к папкам внутри вашей домашней директории."
+
+    if not target.exists():
+        return f"Ошибка: каталог '{dir_path}' не найден."
+    if not target.is_dir():
+        return f"Ошибка: '{dir_path}' — это не каталог."
+
+    try:
+        items = []
+        for item in target.iterdir():
+            item_type = "📁 Папка" if item.is_dir() else "📄 Файл"
+            size = ""
+            if item.is_file():
+                size_mb = item.stat().st_size / (1024 * 1024)
+                size = f" ({size_mb:.1f} МБ)"
+            items.append(f"{item_type}: {item.name}{size}")
+
+        if not items:
+            return f"Каталог '{dir_path}' пуст."
+
+        return f"Содержимое каталога '{dir_path}':\n" + "\n".join(items)
+    except Exception as e:
+        return f"Ошибка при чтении каталога: {e}"
+
+def delete_item(item_path):
+    """Удаляет файл или папку (только внутри домашней папки)."""
+    home_dir = Path.home()
+    target = Path(item_path).expanduser().resolve()
+
+    # Защита: разрешаем удалять только внутри домашней папки
+    if not str(target).startswith(str(home_dir)):
+        return "Ошибка: удаление разрешено только внутри вашей домашней директории."
+
+    if not target.exists():
+        return f"Ошибка: '{item_path}' не найден."
+
+    try:
+        if target.is_dir():
+            import shutil
+            shutil.rmtree(target) # Удаляет папку со всем содержимым
+            return f"✅ Папка '{item_path}' успешно удалена."
+        else:
+            target.unlink()
+            return f"✅ Файл '{item_path}' успешно удален."
+    except Exception as e:
+        return f"Ошибка при удалении: {e}"

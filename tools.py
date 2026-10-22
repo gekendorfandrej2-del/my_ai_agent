@@ -125,3 +125,98 @@ def confirm_and_delete(files_to_delete):
     if errors:
         return f"Удалено: {deleted_count}. Ошибки: {'; '.join(errors)}"
     return f"Успешно удалено файлов: {deleted_count}."
+def list_directory(dir_path):
+    """Показывает содержимое указанного каталога (только внутри домашней папки)."""
+    home_dir = Path.home()
+    target = Path(dir_path).expanduser().resolve()
+
+    # Защита: разрешаем смотреть только внутри домашней папки
+    if not str(target).startswith(str(home_dir)):
+        return "Ошибка: доступ разрешен только к папкам внутри вашей домашней директории."
+
+    if not target.exists():
+        return f"Ошибка: каталог '{dir_path}' не найден."
+    if not target.is_dir():
+        return f"Ошибка: '{dir_path}' — это не каталог."
+
+    try:
+        items = []
+        for item in target.iterdir():
+            item_type = "📁 Папка" if item.is_dir() else "📄 Файл"
+            size = ""
+            if item.is_file():
+                size_mb = item.stat().st_size / (1024 * 1024)
+                size = f" ({size_mb:.1f} МБ)"
+            items.append(f"{item_type}: {item.name}{size}")
+
+        if not items:
+            return f"Каталог '{dir_path}' пуст."
+
+        return f"Содержимое каталога '{dir_path}':\n" + "\n".join(items)
+    except Exception as e:
+        return f"Ошибка при чтении каталога: {e}"
+
+def delete_item(item_path):
+    """Удаляет файл или папку (только внутри домашней папки)."""
+    home_dir = Path.home()
+    target = Path(item_path).expanduser().resolve()
+
+    # Защита: разрешаем удалять только внутри домашней папки
+    if not str(target).startswith(str(home_dir)):
+        return "Ошибка: удаление разрешено только внутри вашей домашней директории."
+
+    if not target.exists():
+        return f"Ошибка: '{item_path}' не найден."
+
+    try:
+        if target.is_dir():
+            import shutil
+            shutil.rmtree(target) # Удаляет папку со всем содержимым
+            return f"✅ Папка '{item_path}' успешно удалена."
+        else:
+            target.unlink()
+            return f"✅ Файл '{item_path}' успешно удален."
+    except Exception as e:
+        return f"Ошибка при удалении: {e}"
+def find_new_files(days=7):
+    """Ищет новые файлы за последние N дней в рабочих папках."""
+    from datetime import datetime, timedelta
+    import os
+    
+    home_dir = Path.home()
+    folders_to_check = [
+        home_dir / "Документы",
+        home_dir / "Загрузки",
+        home_dir / "Рабочий стол"
+    ]
+    
+    cutoff_date = datetime.now() - timedelta(days=days)
+    new_files = []
+    
+    try:
+        for folder in folders_to_check:
+            if folder.exists() and folder.is_dir():
+                for root, dirs, files in os.walk(folder):
+                    # Пропускаем скрытые папки
+                    dirs[:] = [d for d in dirs if not d.startswith('.')]
+                    for file in files:
+                        filepath = Path(root) / file
+                        if filepath.is_file():
+                            mtime = datetime.fromtimestamp(filepath.stat().st_mtime)
+                            if mtime > cutoff_date:
+                                size_mb = filepath.stat().st_size / (1024 * 1024)
+                                # Короткий путь для красоты
+                                short_path = str(filepath).replace(str(home_dir), "~")
+                                new_files.append(f"{short_path} ({size_mb:.1f} МБ, {mtime.strftime('%d.%m.%Y')})")
+        
+        if not new_files:
+            return f"За последние {days} дней новых файлов не найдено."
+        
+        # Сортируем по дате (сначала самые новые)
+        result = f"Найдено {len(new_files)} новых файлов за последние {days} дней:\n"
+        result += "\n".join(new_files[:20]) # Показываем первые 20, чтобы не перегружать
+        if len(new_files) > 20:
+            result += f"\n... и еще {len(new_files) - 20} файлов."
+        return result
+    except Exception as e:
+        return f"Ошибка при поиске новых файлов: {e}"
