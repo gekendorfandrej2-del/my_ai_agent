@@ -178,3 +178,75 @@ def delete_item(item_path):
             return f"✅ Файл '{item_path}' успешно удален."
     except Exception as e:
         return f"Ошибка при удалении: {e}"
+def find_new_files(days=7):
+    """Ищет новые файлы за последние N дней в рабочих папках."""
+    from datetime import datetime, timedelta
+    import os
+    
+    home_dir = Path.home()
+    folders_to_check = [
+        home_dir / "Документы",
+        home_dir / "Загрузки",
+        home_dir / "Рабочий стол"
+    ]
+    
+    cutoff_date = datetime.now() - timedelta(days=days)
+    new_files = []
+    
+    try:
+        for folder in folders_to_check:
+            if folder.exists() and folder.is_dir():
+                for root, dirs, files in os.walk(folder):
+                    # Пропускаем скрытые папки
+                    dirs[:] = [d for d in dirs if not d.startswith('.')]
+                    for file in files:
+                        filepath = Path(root) / file
+                        if filepath.is_file():
+                            mtime = datetime.fromtimestamp(filepath.stat().st_mtime)
+                            if mtime > cutoff_date:
+                                size_mb = filepath.stat().st_size / (1024 * 1024)
+                                # Короткий путь для красоты
+                                short_path = str(filepath).replace(str(home_dir), "~")
+                                new_files.append(f"{short_path} ({size_mb:.1f} МБ, {mtime.strftime('%d.%m.%Y')})")
+        
+        if not new_files:
+            return f"За последние {days} дней новых файлов не найдено."
+        
+        # Сортируем по дате (сначала самые новые)
+        result = f"Найдено {len(new_files)} новых файлов за последние {days} дней:\n"
+        result += "\n".join(new_files[:20]) # Показываем первые 20, чтобы не перегружать
+        if len(new_files) > 20:
+            result += f"\n... и еще {len(new_files) - 20} файлов."
+        return result
+    except Exception as e:
+        return f"Ошибка при поиске новых файлов: {e}"
+
+def check_system_errors():
+    """Проверяет системный журнал на наличие ошибок с момента последней загрузки."""
+    import subprocess
+    
+    try:
+        # Запускаем journalctl: только ошибки (-p err), только текущая загрузка (-b), без пейджера (--no-pager)
+        result = subprocess.run(
+            ["journalctl", "-p", "err", "-b", "--no-pager"],
+            capture_output=True, text=True, timeout=10
+        )
+        
+        # Если вывод пустой (или только служебные строки), значит ошибок нет
+        output = result.stdout.strip()
+        if not output or "No entries" in output:
+            return "✅ Системных ошибок с момента последней загрузки не обнаружено."
+        
+        # Если вывод слишком длинный, обрезаем его для читаемости
+        lines = output.split("\n")
+        if len(lines) > 15:
+            return "⚠️ Обнаружены системные ошибки (показаны первые 15):\n" + "\n".join(lines[:15]) + "\n... (список обрезан)"
+        
+        return "⚠️ Обнаружены системные ошибки:\n" + output
+        
+    except FileNotFoundError:
+        return "Ошибка: команда journalctl не найдена в системе."
+    except subprocess.TimeoutExpired:
+        return "Ошибка: проверка логов заняла слишком много времени."
+    except Exception as e:
+        return f"Ошибка при проверке логов: {e}"

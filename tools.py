@@ -220,3 +220,48 @@ def find_new_files(days=7):
         return result
     except Exception as e:
         return f"Ошибка при поиске новых файлов: {e}"
+
+def check_system_errors():
+    """Проверяет системный журнал на наличие ошибок. Пробует journalctl, затем syslog."""
+    import subprocess
+    from pathlib import Path
+    
+    errors_found = []
+    
+    # Попытка 1: journalctl (самый современный способ)
+    try:
+        result = subprocess.run(
+            ["journalctl", "-p", "err", "-b", "--no-pager"],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            if "No entries" not in result.stdout:
+                errors_found.extend(result.stdout.strip().split("\n"))
+    except Exception:
+        pass # Если не вышло, идем дальше
+
+    # Попытка 2: если journalctl не дал результата, читаем /var/log/syslog
+    if not errors_found:
+        syslog_path = Path("/var/log/syslog")
+        if syslog_path.exists():
+            try:
+                # Читаем последние 1000 строк (чтобы не тормозить)
+                with open(syslog_path, "r", encoding="utf-8", errors="ignore") as f:
+                    lines = f.readlines()[-1000:]
+                
+                # Ищем слова ошибок (регистронезависимо)
+                for line in lines:
+                    lower_line = line.lower()
+                    if "error" in lower_line or "fail" in lower_line:
+                        errors_found.append(line.strip())
+            except Exception as e:
+                return f"Ошибка при чтении syslog: {e}"
+
+    if not errors_found:
+        return "✅ Системных ошибок не обнаружено (или нет прав для чтения логов)."
+    
+    # Обрезаем список для читаемости
+    if len(errors_found) > 15:
+        return "⚠️ Найдены ошибки (первые 15):\n" + "\n".join(errors_found[:15]) + "\n... (список обрезан)"
+    
+    return "⚠️ Найдены ошибки:\n" + "\n".join(errors_found)

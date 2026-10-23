@@ -1,7 +1,7 @@
 import json
 from gigachat import GigaChat
 from gigachat.models import Chat, Messages, MessagesRole, Function, FunctionParameters
-from tools import get_disk_space, find_old_screenshots, get_largest_files, confirm_and_delete, list_directory, delete_item, find_new_files
+from tools import get_disk_space, find_old_screenshots, get_largest_files, confirm_and_delete, list_directory, delete_item, find_new_files, check_system_errors
 
 AVAILABLE_TOOLS = {
     "get_disk_space": get_disk_space,
@@ -11,6 +11,7 @@ AVAILABLE_TOOLS = {
     "list_directory": list_directory,
     "delete_item": delete_item,
     "find_new_files": find_new_files,
+    "check_system_errors": check_system_errors,
 }
 
 def get_tool_descriptions():
@@ -81,6 +82,11 @@ def get_tool_descriptions():
                 },
                 required=[]
             )
+        ),
+        Function(
+            name="check_system_errors",
+            description="Проверяет системный журнал (journalctl) на наличие ошибок с момента последней загрузки. Помогает выявить проблемы с драйверами или службами.",
+            parameters=FunctionParameters(type="object", properties={}, required=[])
         )
     ]
 def run_agent(giga: GigaChat, user_message: str, chat_history: list) -> str:
